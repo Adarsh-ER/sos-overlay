@@ -16,7 +16,8 @@ stays on top of Google Maps (or any app) and shares its location with the riders
 - Reminder card for Fuel / Food: just the reminder text — no coordinates, no map buttons.
 - **Rider group** config: your name, group code, rider list, and the two sharing channels.
 - **Offline**: Google Nearby Connections (Bluetooth/Wi-Fi, no mobile data, a few hundred metres).
-- **Online**: internet via a public `ntfy.sh` topic derived from the group code (no account/server needed).
+- **Online**: Firebase Realtime Database (existing `ridepack-3d413` project, anonymous auth,
+  push-based event stream — measured ~300 ms).
 - Foreground service so the button and the group link stay alive while you navigate.
 
 ## Use
@@ -38,5 +39,5 @@ adb install -r app-debug.apk
 
 ## Notes
 - Android 8.0+ (API 26+). Google Play services for location + Nearby.
-- Online mode uses a public topic (`sosoverlay-<groupcode>`); anyone who knows the group code can
-  read that topic, so use an uncommon code. Offline mode works with no internet at all.
+- Online mode uses the ridepack-3d413 Firebase Realtime Database; the group code selects the path
+  `rides/<group>/sos`, and access uses Firebase anonymous auth (already enabled on the project).

@@ -4,11 +4,9 @@ import android.content.Context
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.*
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.Collections
 
-/** One SOS / Fuel / Food message shared with the rider group. */
+/** One SOS / Fuel / Food / presence message shared with the rider group. */
 data class SosPacket(
     val id: String,
     val name: String,
@@ -43,7 +41,7 @@ object LinkStatus {
 /**
  * Shares SOS packets with the riders in the same group.
  *  - Offline: Google Nearby Connections over Bluetooth/Wi-Fi (works with no data).
- *  - Online:  a public ntfy.sh topic derived from the group code (works over the internet).
+ *  - Online:  Firebase Realtime Database (push-based event stream, low latency).
  */
 class RiderLink(
     private val ctx: Context,
@@ -53,21 +51,16 @@ class RiderLink(
 ) {
     private var nearby: ConnectionsClient? = null
     private val connected: MutableSet<String> = Collections.synchronizedSet(HashSet())
-
-    @Volatile private var online = false
-    @Volatile private var topic = ""
-    @Volatile private var stream: HttpURLConnection? = null
-    private var onlineThread: Thread? = null
+    private var firebase: FirebaseLink? = null
 
     private fun status(s: String) { LinkStatus.text = s; onStatus(s) }
 
     fun start(group: String) {
         stop()
-        topic = topicName(group)
         if (Prefs.offline) startNearby(group)
         if (Prefs.online) {
-            online = true
-            onlineThread = Thread { onlineLoop() }.also { it.start() }
+            firebase = FirebaseLink(onPacket, ::status)
+            firebase?.start(group)
         }
     }
 
@@ -111,56 +104,6 @@ class RiderLink(
         status("Nearby: searching for riders…")
     }
 
-    // ---------------- online (internet) ----------------
-
-    private fun topicName(group: String): String {
-        val clean = group.lowercase().filter { it.isLetterOrDigit() || it == '-' || it == '_' }.ifBlank { "sos1" }
-        return "sosoverlay-$clean"
-    }
-
-    private fun onlineLoop() {
-        while (online) {
-            try {
-                val c = URL("https://ntfy.sh/$topic/json").openConnection() as HttpURLConnection
-                c.connectTimeout = 15000
-                c.readTimeout = 0
-                c.setRequestProperty("Accept", "application/json")
-                stream = c
-                status("Online: listening")
-                c.inputStream.bufferedReader().useLines { lines ->
-                    for (line in lines) {
-                        if (!online) break
-                        val msg = try { JSONObject(line).optString("message", "") } catch (e: Exception) { "" }
-                        if (msg.isNotBlank()) SosPacket.parse(msg)?.let(onPacket)
-                    }
-                }
-                status("Online: reconnecting…")
-            } catch (e: Exception) {
-                if (online) status("Online: waiting for internet")
-            } finally {
-                try { stream?.disconnect() } catch (e: Exception) {}
-                stream = null
-            }
-            if (online) try { Thread.sleep(3000) } catch (e: InterruptedException) { return }
-        }
-    }
-
-    private fun publish(p: SosPacket) {
-        try {
-            val c = URL("https://ntfy.sh/$topic").openConnection() as HttpURLConnection
-            c.requestMethod = "POST"
-            c.doOutput = true
-            c.connectTimeout = 10000
-            c.readTimeout = 10000
-            c.setRequestProperty("Content-Type", "text/plain; charset=utf-8")
-            c.outputStream.use { it.write(p.toJson().toByteArray()) }
-            c.responseCode
-            status("Online: sent")
-        } catch (e: Exception) {
-            status("Online: could not send")
-        }
-    }
-
     // ---------------- send ----------------
 
     fun send(p: SosPacket) {
@@ -169,15 +112,12 @@ class RiderLink(
         if (targets.isNotEmpty()) {
             try { nearby?.sendPayload(targets, Payload.fromBytes(json.toByteArray())) } catch (e: Exception) {}
         }
-        if (online) Thread { publish(p) }.start()
+        firebase?.send(p)
     }
 
     fun stop() {
-        online = false
-        try { stream?.disconnect() } catch (e: Exception) {}
-        stream = null
-        onlineThread?.interrupt()
-        onlineThread = null
+        firebase?.stop()
+        firebase = null
         try {
             nearby?.stopAdvertising()
             nearby?.stopDiscovery()
