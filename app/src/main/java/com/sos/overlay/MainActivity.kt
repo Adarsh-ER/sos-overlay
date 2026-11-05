@@ -13,6 +13,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -44,6 +45,33 @@ private fun hasNotifications(c: Context) =
     Build.VERSION.SDK_INT < 33 ||
         ContextCompat.checkSelfPermission(c, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
+private fun granted(c: Context, p: String) =
+    ContextCompat.checkSelfPermission(c, p) == PackageManager.PERMISSION_GRANTED
+
+/** Android 12+ needs Bluetooth permissions for Nearby; Android 13+ also Nearby Wi-Fi. */
+private fun hasNearby(c: Context): Boolean {
+    if (Build.VERSION.SDK_INT < 31) return true
+    val bt = granted(c, Manifest.permission.BLUETOOTH_SCAN) &&
+        granted(c, Manifest.permission.BLUETOOTH_ADVERTISE) &&
+        granted(c, Manifest.permission.BLUETOOTH_CONNECT)
+    val wifi = Build.VERSION.SDK_INT < 33 || granted(c, Manifest.permission.NEARBY_WIFI_DEVICES)
+    return bt && wifi
+}
+
+private fun neededPerms(): Array<String> = buildList {
+    add(Manifest.permission.ACCESS_FINE_LOCATION)
+    add(Manifest.permission.ACCESS_COARSE_LOCATION)
+    if (Build.VERSION.SDK_INT >= 31) {
+        add(Manifest.permission.BLUETOOTH_SCAN)
+        add(Manifest.permission.BLUETOOTH_ADVERTISE)
+        add(Manifest.permission.BLUETOOTH_CONNECT)
+    }
+    if (Build.VERSION.SDK_INT >= 33) {
+        add(Manifest.permission.NEARBY_WIFI_DEVICES)
+        add(Manifest.permission.POST_NOTIFICATIONS)
+    }
+}.toTypedArray()
+
 private fun copyCode(ctx: Context) {
     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
     cm.setPrimaryClip(android.content.ClipData.newPlainText("rider code", Prefs.id))
@@ -63,6 +91,7 @@ fun Screen() {
     val ctx = LocalContext.current
     var overlay by remember { mutableStateOf(Settings.canDrawOverlays(ctx)) }
     var location by remember { mutableStateOf(hasLocation(ctx)) }
+    var nearby by remember { mutableStateOf(hasNearby(ctx)) }
     var notifications by remember { mutableStateOf(hasNotifications(ctx)) }
     var running by remember { mutableStateOf(SosService.running) }
     var name by remember { mutableStateOf(Prefs.name) }
@@ -73,6 +102,7 @@ fun Screen() {
     var newCode by remember { mutableStateOf("") }
     val perms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         location = hasLocation(ctx)
+        nearby = hasNearby(ctx)
         notifications = hasNotifications(ctx)
     }
     val link by produceState(LinkStatus.text) {
@@ -85,8 +115,11 @@ fun Screen() {
     LaunchedEffect(Unit) {
         overlay = Settings.canDrawOverlays(ctx)
         location = hasLocation(ctx)
+        nearby = hasNearby(ctx)
         notifications = hasNotifications(ctx)
         running = SosService.running
+        // Ask for everything the first time so Nearby sharing actually works on Android 12+.
+        if (!location || !nearby) perms.launch(neededPerms())
     }
 
     Column(
@@ -163,9 +196,10 @@ fun Screen() {
         }
 
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusChip("Overlay", overlay)
             StatusChip("Location", location)
+            StatusChip("Nearby", nearby)
             StatusChip("Alerts", notifications)
             StatusChip("Active", running)
         }
@@ -182,26 +216,14 @@ fun Screen() {
             Text("Choose SOS Overlay → \"Allow display over other apps\".", fontSize = 12.sp, color = Color.Gray)
         }
 
-        if (!location) {
+        if (!location || !nearby) {
             Button(
-                onClick = {
-                    val list = buildList {
-                        add(Manifest.permission.ACCESS_FINE_LOCATION)
-                        add(Manifest.permission.ACCESS_COARSE_LOCATION)
-                        if (Build.VERSION.SDK_INT >= 31) {
-                            add(Manifest.permission.BLUETOOTH_SCAN)
-                            add(Manifest.permission.BLUETOOTH_ADVERTISE)
-                            add(Manifest.permission.BLUETOOTH_CONNECT)
-                        }
-                        if (Build.VERSION.SDK_INT >= 33) {
-                            add(Manifest.permission.NEARBY_WIFI_DEVICES)
-                            add(Manifest.permission.POST_NOTIFICATIONS)
-                        }
-                    }
-                    perms.launch(list.toTypedArray())
-                },
+                onClick = { perms.launch(neededPerms()) },
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("Allow location & nearby") }
+            ) { Text("Allow location & nearby permissions") }
+            if (!nearby) {
+                Text("Offline sharing needs Bluetooth + Nearby devices permission.", fontSize = 12.sp, color = Color.Gray)
+            }
         }
 
         if (!notifications) {

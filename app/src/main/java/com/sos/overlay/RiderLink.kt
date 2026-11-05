@@ -13,11 +13,13 @@ data class SosPacket(
     val kind: String,
     val lat: Double,
     val lon: Double,
-    val ts: Long
+    val ts: Long,
+    val hasLoc: Boolean = true
 ) {
     fun toJson(): String = JSONObject()
         .put("id", id).put("n", name).put("k", kind)
-        .put("la", lat).put("lo", lon).put("t", ts).toString()
+        .put("la", lat).put("lo", lon).put("t", ts)
+        .put("nl", if (hasLoc) 0 else 1).toString()
 
     companion object {
         fun parse(s: String): SosPacket? = try {
@@ -28,7 +30,8 @@ data class SosPacket(
                 o.optString("k", "sos"),
                 o.optDouble("la", 0.0),
                 o.optDouble("lo", 0.0),
-                o.optLong("t", System.currentTimeMillis())
+                o.optLong("t", System.currentTimeMillis()),
+                o.optInt("nl", 0) == 0
             )
         } catch (e: Exception) { null }
     }
@@ -100,7 +103,9 @@ class RiderLink(
 
         val serviceId = "com.sos.overlay.$group"
         client.startAdvertising(Prefs.id, serviceId, life, AdvertisingOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build())
+            .addOnFailureListener { status("Nearby: advertise failed (${it.message})") }
         client.startDiscovery(serviceId, discovery, DiscoveryOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build())
+            .addOnFailureListener { status("Nearby: discovery failed (${it.message})") }
         status("Nearby: searching for riders…")
     }
 

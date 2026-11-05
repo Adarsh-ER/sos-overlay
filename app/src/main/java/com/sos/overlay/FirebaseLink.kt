@@ -88,9 +88,10 @@ class FirebaseLink(
     }
 
     fun send(p: SosPacket) {
-        val t = token ?: return
         Thread {
             try {
+                // If the stream has not connected yet, fetch a token here so alerts are never dropped.
+                val t = token ?: fetchToken().also { token = it }
                 val c = URL("$DB/rides/$group/sos.json?auth=$t").openConnection() as HttpURLConnection
                 c.requestMethod = "POST"
                 c.doOutput = true

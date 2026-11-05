@@ -200,20 +200,33 @@ class SosService : Service() {
         show(box)
     }
 
+    private var sosPending = false
+
     private fun captureAndSend(kind: String) {
         removeCard()
+        sosPending = true
+        // If the GPS fix takes too long, still send the alert (without coordinates) so nobody is left waiting.
+        val fallback = Runnable {
+            if (sosPending) { sosPending = false; send(kind, lastLoc) }
+        }
+        main.postDelayed(fallback, 6000)
         try {
             fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
-                .addOnSuccessListener { loc -> lastLoc = loc; send(kind, loc) }
-                .addOnFailureListener { send(kind, lastLoc) }
+                .addOnSuccessListener { loc ->
+                    lastLoc = loc
+                    if (sosPending) { sosPending = false; main.removeCallbacks(fallback); send(kind, loc) }
+                }
+                .addOnFailureListener {
+                    if (sosPending) { sosPending = false; main.removeCallbacks(fallback); send(kind, lastLoc) }
+                }
         } catch (e: SecurityException) {
-            send(kind, lastLoc)
+            if (sosPending) { sosPending = false; main.removeCallbacks(fallback); send(kind, lastLoc) }
         }
     }
 
     /** Fuel / Food are reminders only — no location is captured or shown. */
     private fun sendReminder(kind: String) {
-        val p = SosPacket(Prefs.id, Prefs.name, kind, 0.0, 0.0, System.currentTimeMillis())
+        val p = SosPacket(Prefs.id, Prefs.name, kind, 0.0, 0.0, System.currentTimeMillis(), false)
         link?.send(p)
         val box = cardBox()
         box.addView(label("${emoji(kind)} ${title(kind)} sent", 20f, true))
@@ -224,23 +237,23 @@ class SosService : Service() {
     }
 
     private fun send(kind: String, loc: Location?) {
-        if (loc == null) {
-            val box = cardBox()
-            box.addView(label("${emoji(kind)} ${title(kind)}", 20f, true))
-            box.addView(label("No GPS fix yet — wait a moment and try again.", 14f, false))
-            box.addView(action("OK") { removeCard() })
-            show(box)
-            return
-        }
-        val p = SosPacket(Prefs.id, Prefs.name, kind, loc.latitude, loc.longitude, System.currentTimeMillis())
+        val p = SosPacket(
+            Prefs.id, Prefs.name, kind,
+            loc?.latitude ?: 0.0, loc?.longitude ?: 0.0,
+            System.currentTimeMillis(), loc != null
+        )
         link?.send(p)
 
         val box = cardBox()
         box.addView(label("${emoji(kind)} ${title(kind)} sent", 20f, true))
         box.addView(label("Shared with group ${Prefs.group}", 13f, false))
-        box.addView(label("%.5f, %.5f".format(loc.latitude, loc.longitude), 13f, false))
-        box.addView(action("Open in Google Maps") { openMaps(loc) })
-        box.addView(action("Share location") { share(loc) })
+        if (loc != null) {
+            box.addView(label("%.5f, %.5f".format(loc.latitude, loc.longitude), 13f, false))
+            box.addView(action("Open in Google Maps") { openMaps(loc) })
+            box.addView(action("Share location") { share(loc) })
+        } else {
+            box.addView(label("No GPS fix yet — the alert was sent without coordinates.", 13f, false))
+        }
         box.addView(action("Close") { removeCard() })
         show(box)
     }
@@ -277,21 +290,24 @@ class SosService : Service() {
 
     private fun showSosIncoming(p: SosPacket) {
         val name = RiderBook.nameFor(p.id) ?: p.name
-        val target = Location("gps").apply { latitude = p.lat; longitude = p.lon }
-        val dist = lastLoc?.distanceTo(target)
-        val away = dist?.let { " · " + "%.1f".format(it / 1000.0) + " km away" } ?: ""
-        notify("🆘 SOS", "$name needs help$away")
+        notify("🆘 SOS", "$name needs help")
         val box = cardBox()
         box.addView(label("🆘 SOS — $name", 20f, true))
-        box.addView(
-            label(
-                if (dist != null) "%.1f km away · rider ${p.id} · %.5f, %.5f".format(dist / 1000.0, p.lat, p.lon)
-                else "rider ${p.id} · %.5f, %.5f".format(p.lat, p.lon),
-                13f, false
+        if (p.hasLoc) {
+            val target = Location("gps").apply { latitude = p.lat; longitude = p.lon }
+            val dist = lastLoc?.distanceTo(target)
+            box.addView(
+                label(
+                    if (dist != null) "%.1f km away · rider ${p.id} · %.5f, %.5f".format(dist / 1000.0, p.lat, p.lon)
+                    else "rider ${p.id} · %.5f, %.5f".format(p.lat, p.lon),
+                    13f, false
+                )
             )
-        )
-        box.addView(action("Open in Google Maps") { openMaps(target) })
-        box.addView(action("Share location") { share(target) })
+            box.addView(action("Open in Google Maps") { openMaps(target) })
+            box.addView(action("Share location") { share(target) })
+        } else {
+            box.addView(label("Rider ${p.id} · location not available yet", 13f, false))
+        }
         box.addView(action("Close") { removeCard() })
         show(box)
     }
