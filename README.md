@@ -1,43 +1,33 @@
-# SOS Overlay — standalone Android app
+# SOS Overlay
 
-A separate application (package `com.sos.overlay`, app name **SOS Overlay**), independent of the
-RidePack app (`com.ridepack.app`). Same feature set at its core: live map, ride-code pairing,
-rider tracking over Bluetooth/Wi-Fi (Google Nearby), regroup alerts, and SOS with live rider
-positions on the map.
+A minimal standalone Android app (package `com.sos.overlay`) whose **only job** is an SOS button
+that floats above Google Maps (and any other app).
 
-## Identity
-- App name: **SOS Overlay**
-- Application ID: `com.sos.overlay`
-- Launcher logo: red SOS disc with a white bolt (`res/drawable/ic_sos_*`, adaptive icon
-  `res/mipmap-anydpi-v26/ic_launcher.xml`)
+## What it does
+- Draws a draggable red **SOS** button on top of other apps using a system overlay
+  (`SYSTEM_ALERT_WINDOW`).
+- Tap the button: it captures your GPS location and shows a card with
+  **Open in Google Maps** and **Share location** (Google Maps link).
+- Runs in a foreground service, so the overlay stays alive while you navigate.
+- No maps SDK, no API key, no RidePack code, no rider pairing — just the SOS overlay.
 
-## Features
-- Offline map areas (MapLibre), live GPS, GPX route import with turn-by-turn.
-- Places along the ride (fuel / food / viewpoint / repair / stay).
-- Ride-code pairing (create/join), rider tagging by ID.
-- Phone-to-phone tracking over Bluetooth/Wi-Fi with no mobile data.
-- Regroup alerts when a rider is more than 1.5 km away.
-- **SOS**: red 🆘 button on the map sends your GPS fix to the ride group; every rider sees a red
-  `🚨 SOS · <name>` marker, an alert card with distance, **Locate**, **Open in Google Maps**,
-  and **Resolve** actions.
-- Foreground service so tracking continues with the screen off.
+## Use
+1. Open the app.
+2. Allow **display over other apps**.
+3. Allow **location** (and notifications on Android 13+).
+4. Tap **Turn on floating SOS**.
+5. Open Google Maps — the red SOS button floats above it. Drag it anywhere. Tap it to act.
 
 ## Build
-Open the folder in Android Studio, or from a terminal:
+```
+./gradlew assembleDebug        # -> app/build/outputs/apk/debug/app-debug.apk
+```
 
-    gradle wrapper --gradle-version 8.7
-    ./gradlew assembleDebug        # -> app/build/outputs/apk/debug/app-debug.apk
-
-This project was built with JDK 17 + Android SDK 34 (`local.properties` points at the SDK).
-
-## Test on phones (USB debugging on)
-    adb devices
-    ANDROID_SERIAL=<serialA> ./adb-check.sh
-    ANDROID_SERIAL=<serialB> ./adb-check.sh
-
-Phone A: Pair tab -> Create ride. Phone B: enter the code -> Join.
-Pair tab should show "1 radio link(s)".
+## Install (sideload)
+```
+adb install -r app-debug.apk
+```
 
 ## Notes
-- Needs Google Play services (Nearby, location). Radio range is a few hundred metres; no multi-hop relay yet.
-- Anyone with the ride code can join; positions are not encrypted yet.
+- Android 8.0+ (API 26+).
+- Google Play services is used only for the location fix.
