@@ -1,6 +1,7 @@
 package com.sos.overlay
 
 import android.content.Context
+import android.util.Log
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.*
 import org.json.JSONObject
@@ -80,13 +81,16 @@ class RiderLink(
 
         val payload = object : PayloadCallback() {
             override fun onPayloadReceived(ep: String, p: Payload) {
-                p.asBytes()?.let { bytes -> SosPacket.parse(String(bytes))?.let(onPacket) }
+                val bytes = p.asBytes() ?: return
+                Log.d("SosOverlay", "nearby rx ${bytes.size}b from $ep")
+                SosPacket.parse(String(bytes))?.let(onPacket)
             }
             override fun onPayloadTransferUpdate(ep: String, u: PayloadTransferUpdate) {}
         }
         val life = object : ConnectionLifecycleCallback() {
             override fun onConnectionInitiated(ep: String, info: ConnectionInfo) { client.acceptConnection(ep, payload) }
             override fun onConnectionResult(ep: String, res: ConnectionResolution) {
+                Log.d("SosOverlay", "nearby connect $ep status=${res.status.statusCode} success=${res.status.isSuccess}")
                 if (res.status.isSuccess) {
                     connected.add(ep)
                     onLinked()
@@ -119,8 +123,13 @@ class RiderLink(
     fun send(p: SosPacket) {
         val json = p.toJson()
         val targets = synchronized(connected) { connected.toList() }
+        Log.d("SosOverlay", "nearby tx ${p.kind} to ${targets.size} endpoint(s)")
         if (targets.isNotEmpty()) {
-            try { nearby?.sendPayload(targets, Payload.fromBytes(json.toByteArray())) } catch (e: Exception) {}
+            try {
+                nearby?.sendPayload(targets, Payload.fromBytes(json.toByteArray()))
+            } catch (e: Exception) {
+                Log.d("SosOverlay", "nearby tx failed: ${e.message}")
+            }
         }
         firebase?.send(p)
     }

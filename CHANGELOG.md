@@ -2,6 +2,12 @@
 
 All notable changes to SOS Overlay. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.0.1] — 2026-11-05
+
+- Nearby diagnostics: logs for Nearby connect status, `nearby tx … to N endpoint(s)` and `nearby rx …`
+  so the offline link can be verified from logcat.
+- Duplicate suppression: an alert that arrives over both Nearby and Firebase is now shown once.
+
 ## [1.0.0] — 2026-11-05 · First stable release
 
 The stable baseline.

@@ -59,6 +59,7 @@ class SosService : Service() {
         }
     }
     private val main = android.os.Handler(Looper.getMainLooper())
+    private val seen = java.util.Collections.synchronizedSet(HashSet<String>())
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -262,6 +263,10 @@ class SosService : Service() {
 
     private fun onPacket(p: SosPacket) {
         if (p.id == Prefs.id) return
+        // The same alert can arrive over both Nearby and Firebase — show it once.
+        val key = "${p.id}|${p.kind}|${p.ts}"
+        if (!seen.add(key)) return
+        if (seen.size > 200) seen.clear()
         if (p.kind == "hello") {
             // A rider joined the group: show them on this phone too.
             RiderBook.see(p.id, p.name)
