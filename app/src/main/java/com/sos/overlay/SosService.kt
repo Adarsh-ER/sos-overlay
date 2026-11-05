@@ -289,8 +289,11 @@ class SosService : Service() {
 
     private fun show(box: View) {
         removeCard()
+        // Cap the popup width so it stays a card in both portrait and landscape (not full-screen).
+        val dm = resources.displayMetrics
+        val width = minOf(dm.widthPixels - dp(32), dp(380)).coerceAtLeast(dp(260))
         val lp = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
+            width,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
