@@ -38,7 +38,11 @@ data class SosPacket(
 }
 
 object LinkStatus {
-    @Volatile var text: String = "Idle"
+    @Volatile var nearby: String = "Nearby: idle"
+    @Volatile var online: String = "Online: idle"
+    @Volatile var text: String = "Nearby: idle · Online: idle"
+
+    fun refresh() { text = "$nearby · $online" }
 }
 
 /**
@@ -56,13 +60,14 @@ class RiderLink(
     private val connected: MutableSet<String> = Collections.synchronizedSet(HashSet())
     private var firebase: FirebaseLink? = null
 
-    private fun status(s: String) { LinkStatus.text = s; onStatus(s) }
+    private fun statusNearby(s: String) { LinkStatus.nearby = s; LinkStatus.refresh(); onStatus(s) }
+    private fun statusOnline(s: String) { LinkStatus.online = s; LinkStatus.refresh(); onStatus(s) }
 
     fun start(group: String) {
         stop()
         if (Prefs.offline) startNearby(group)
         if (Prefs.online) {
-            firebase = FirebaseLink(onPacket, ::status)
+            firebase = FirebaseLink(onPacket, ::statusOnline)
             firebase?.start(group)
         }
     }
@@ -86,11 +91,11 @@ class RiderLink(
                     connected.add(ep)
                     onLinked()
                 }
-                status("Nearby: ${connected.size} rider(s) linked")
+                statusNearby("Nearby: ${connected.size} rider(s) linked")
             }
             override fun onDisconnected(ep: String) {
                 connected.remove(ep)
-                status("Nearby: ${connected.size} rider(s) linked")
+                statusNearby("Nearby: ${connected.size} rider(s) linked")
             }
         }
         val discovery = object : EndpointDiscoveryCallback() {
@@ -103,10 +108,10 @@ class RiderLink(
 
         val serviceId = "com.sos.overlay.$group"
         client.startAdvertising(Prefs.id, serviceId, life, AdvertisingOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build())
-            .addOnFailureListener { status("Nearby: advertise failed (${it.message})") }
+            .addOnFailureListener { statusNearby("Nearby: advertise failed (${it.message})") }
         client.startDiscovery(serviceId, discovery, DiscoveryOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build())
-            .addOnFailureListener { status("Nearby: discovery failed (${it.message})") }
-        status("Nearby: searching for riders…")
+            .addOnFailureListener { statusNearby("Nearby: discovery failed (${it.message})") }
+        statusNearby("Nearby: searching for riders…")
     }
 
     // ---------------- send ----------------
@@ -130,6 +135,8 @@ class RiderLink(
         } catch (e: Exception) {}
         nearby = null
         connected.clear()
-        status("Offline")
+        LinkStatus.nearby = "Nearby: off"
+        LinkStatus.online = "Online: off"
+        LinkStatus.refresh()
     }
 }

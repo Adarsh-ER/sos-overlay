@@ -197,31 +197,31 @@ class SosService : Service() {
         box.addView(action("⛽  Fuel — remind the group") { sendReminder("fuel") })
         box.addView(action("🍴  Food — remind the group") { sendReminder("food") })
         box.addView(action("Cancel") { removeCard() })
-        show(box)
+        show(box, 15000)
     }
-
-    private var sosPending = false
 
     private fun captureAndSend(kind: String) {
         removeCard()
-        sosPending = true
-        // If the GPS fix takes too long, still send the alert (without coordinates) so nobody is left waiting.
-        val fallback = Runnable {
-            if (sosPending) { sosPending = false; send(kind, lastLoc) }
-        }
-        main.postDelayed(fallback, 6000)
+        // Send the alert immediately using the last known fix (if it is reasonably fresh) so riders
+        // are notified without waiting for GPS; then refine with a fresh fix.
+        val now = System.currentTimeMillis()
+        val usable = lastLoc?.takeIf { now - it.time <= 5 * 60 * 1000 }
+        send(kind, usable)
         try {
             fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
                 .addOnSuccessListener { loc ->
                     lastLoc = loc
-                    if (sosPending) { sosPending = false; main.removeCallbacks(fallback); send(kind, loc) }
+                    if (usable == null || loc.distanceTo(usable) > 30) {
+                        link?.send(
+                            SosPacket(
+                                Prefs.id, Prefs.name, kind,
+                                loc.latitude, loc.longitude,
+                                System.currentTimeMillis(), true
+                            )
+                        )
+                    }
                 }
-                .addOnFailureListener {
-                    if (sosPending) { sosPending = false; main.removeCallbacks(fallback); send(kind, lastLoc) }
-                }
-        } catch (e: SecurityException) {
-            if (sosPending) { sosPending = false; main.removeCallbacks(fallback); send(kind, lastLoc) }
-        }
+        } catch (e: SecurityException) {}
     }
 
     /** Fuel / Food are reminders only — no location is captured or shown. */
@@ -326,7 +326,7 @@ class SosService : Service() {
         }
     }
 
-    private fun show(box: View) {
+    private fun show(box: View, timeoutMs: Long = POPUP_MS) {
         removeCard()
         // Cap the popup width so it stays a card in both portrait and landscape (not full-screen).
         val dm = resources.displayMetrics
@@ -342,10 +342,9 @@ class SosService : Service() {
         try {
             wm.addView(box, lp)
             card = box
-            // Every popup is visible for 5 seconds and then closes on its own.
             val r = Runnable { removeCard() }
             autoClose = r
-            main.postDelayed(r, POPUP_MS)
+            main.postDelayed(r, timeoutMs)
         } catch (e: Exception) {
             // overlay permission revoked
         }
