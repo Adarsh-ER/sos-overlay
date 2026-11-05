@@ -65,6 +65,7 @@ class SosService : Service() {
     override fun onCreate() {
         super.onCreate()
         Prefs.init(this)
+        RiderBook.init(this)
         wm = getSystemService(WindowManager::class.java)
         fused = LocationServices.getFusedLocationProviderClient(this)
         try {
@@ -234,6 +235,7 @@ class SosService : Service() {
 
     private fun onPacket(p: SosPacket) {
         if (p.id == Prefs.id) return
+        RiderBook.note(p.id, p.name)
         // Nearby/online callbacks can arrive on a background thread; overlays must be touched on the main thread.
         main.post { showIncoming(p) }
     }
@@ -244,26 +246,28 @@ class SosService : Service() {
 
     /** Fuel / Food are reminders: notification + popup, no location. */
     private fun showReminderIncoming(p: SosPacket) {
-        notify("${emoji(p.kind)} ${title(p.kind)}", "${p.name} · group ${Prefs.group}")
+        val name = RiderBook.nameFor(p.id) ?: p.name
+        notify("${emoji(p.kind)} ${title(p.kind)}", "$name · group ${Prefs.group}")
         val box = cardBox()
-        box.addView(label("${emoji(p.kind)} ${title(p.kind)} — ${p.name}", 20f, true))
+        box.addView(label("${emoji(p.kind)} ${title(p.kind)} — $name", 20f, true))
         box.addView(label(reminderText(p.kind), 14f, false))
-        box.addView(label("Group ${Prefs.group}", 12f, false))
+        box.addView(label("Rider ${p.id} · group ${Prefs.group}", 12f, false))
         box.addView(action("Close") { removeCard() })
         show(box)
     }
 
     private fun showSosIncoming(p: SosPacket) {
+        val name = RiderBook.nameFor(p.id) ?: p.name
         val target = Location("gps").apply { latitude = p.lat; longitude = p.lon }
         val dist = lastLoc?.distanceTo(target)
         val away = dist?.let { " · " + "%.1f".format(it / 1000.0) + " km away" } ?: ""
-        notify("🆘 SOS", "${p.name} needs help$away")
+        notify("🆘 SOS", "$name needs help$away")
         val box = cardBox()
-        box.addView(label("🆘 SOS — ${p.name}", 20f, true))
+        box.addView(label("🆘 SOS — $name", 20f, true))
         box.addView(
             label(
-                if (dist != null) "%.1f km away · %.5f, %.5f".format(dist / 1000.0, p.lat, p.lon)
-                else "%.5f, %.5f".format(p.lat, p.lon),
+                if (dist != null) "%.1f km away · rider ${p.id} · %.5f, %.5f".format(dist / 1000.0, p.lat, p.lon)
+                else "rider ${p.id} · %.5f, %.5f".format(p.lat, p.lon),
                 13f, false
             )
         )

@@ -32,6 +32,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         Prefs.init(this)
+        RiderBook.init(this)
         setContent { MaterialTheme { Screen() } }
     }
 }
@@ -42,6 +43,20 @@ private fun hasLocation(c: Context) =
 private fun hasNotifications(c: Context) =
     Build.VERSION.SDK_INT < 33 ||
         ContextCompat.checkSelfPermission(c, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+private fun copyCode(ctx: Context) {
+    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    cm.setPrimaryClip(android.content.ClipData.newPlainText("rider code", Prefs.id))
+    Toast.makeText(ctx, "Rider code copied: ${Prefs.id}", Toast.LENGTH_SHORT).show()
+}
+
+private fun shareCode(ctx: Context) {
+    val i = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, "Add me on SOS Overlay — my rider code is ${Prefs.id} (group ${Prefs.group}).")
+    }
+    ctx.startActivity(Intent.createChooser(i, "Share rider code"))
+}
 
 @Composable
 fun Screen() {
@@ -54,8 +69,8 @@ fun Screen() {
     var group by remember { mutableStateOf(Prefs.group) }
     var offline by remember { mutableStateOf(Prefs.offline) }
     var online by remember { mutableStateOf(Prefs.online) }
-    var riders by remember { mutableStateOf(Prefs.riders()) }
-    var newRider by remember { mutableStateOf("") }
+    val contacts by RiderBook.contacts.collectAsState()
+    var newCode by remember { mutableStateOf("") }
     val perms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         location = hasLocation(ctx)
         notifications = hasNotifications(ctx)
@@ -105,27 +120,44 @@ fun Screen() {
             Switch(online, { online = it; Prefs.online = it })
         }
 
-        Text("Riders in this group", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-        if (riders.isEmpty()) {
-            Text("No riders added yet — share the group code with them.", fontSize = 12.sp, color = Color.Gray)
+        Text("Riders", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Your rider code", fontSize = 12.sp, color = Color.Gray)
+                Text(Prefs.id, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            }
+            TextButton(onClick = { copyCode(ctx) }) { Text("Copy") }
+            TextButton(onClick = { shareCode(ctx) }) { Text("Share") }
         }
-        riders.forEach { r ->
+        Text("Share your code with a rider, and add theirs below — names fill in when they send something.", fontSize = 12.sp, color = Color.Gray)
+
+        if (contacts.isEmpty()) {
+            Text("No riders added yet.", fontSize = 12.sp, color = Color.Gray)
+        }
+        contacts.forEach { c ->
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(r, Modifier.weight(1f), fontSize = 14.sp)
-                TextButton(onClick = { riders = riders - r; Prefs.saveRiders(riders) }) { Text("Remove") }
+                Column(Modifier.weight(1f)) {
+                    Text(c.name.ifBlank { "Rider" }, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(c.code, fontSize = 12.sp, color = Color.Gray)
+                }
+                TextButton(onClick = { RiderBook.remove(c.code) }) { Text("Remove") }
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
-                newRider, { newRider = it },
-                label = { Text("Add rider name") }, singleLine = true, modifier = Modifier.weight(1f)
+                newCode, { newCode = it.uppercase() },
+                label = { Text("Add rider by code") }, singleLine = true, modifier = Modifier.weight(1f)
             )
             Button(onClick = {
-                val t = newRider.trim()
-                if (t.isNotEmpty()) {
-                    riders = riders + t
-                    Prefs.saveRiders(riders)
-                    newRider = ""
+                val c = RiderBook.clean(newCode)
+                when {
+                    c.isBlank() -> Toast.makeText(ctx, "Enter a rider code", Toast.LENGTH_SHORT).show()
+                    c == Prefs.id -> Toast.makeText(ctx, "That's your own code", Toast.LENGTH_SHORT).show()
+                    else -> {
+                        RiderBook.add(c)
+                        newCode = ""
+                        Toast.makeText(ctx, "Rider $c added", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }) { Text("Add") }
         }
@@ -204,11 +236,12 @@ fun Screen() {
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
         Text("How to use", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         Text(
-            "1. Put the same group code on every rider's phone.\n" +
-                "2. Turn on the floating SOS (restart it after changing group/channels).\n" +
-                "3. Open Google Maps — the red button floats above the map.\n" +
-                "4. Tap it → SOS shares your location; Fuel / Food just remind the group.\n" +
-                "5. Popups raise a notification and close after 5 seconds.",
+            "1. Share your rider code with the others, and add their codes below.\n" +
+                "2. Put the same group code on every rider's phone.\n" +
+                "3. Turn on the floating SOS (restart it after changing group/channels).\n" +
+                "4. Open Google Maps — the red button floats above the map.\n" +
+                "5. Tap it → SOS shares your location; Fuel / Food just remind the group.\n" +
+                "6. Popups raise a notification and close after 5 seconds.",
             fontSize = 13.sp
         )
         Text(
