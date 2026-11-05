@@ -129,7 +129,7 @@ fun Screen() {
             TextButton(onClick = { copyCode(ctx) }) { Text("Copy") }
             TextButton(onClick = { shareCode(ctx) }) { Text("Share") }
         }
-        Text("Share your code with a rider, and add theirs below — names fill in when they send something.", fontSize = 12.sp, color = Color.Gray)
+        Text("Riders in your group appear here automatically on both phones. You can also add someone by their code.", fontSize = 12.sp, color = Color.Gray)
 
         if (contacts.isEmpty()) {
             Text("No riders added yet.", fontSize = 12.sp, color = Color.Gray)

@@ -54,9 +54,21 @@ object RiderBook {
 
     fun clean(s: String) = s.uppercase().filter { it.isLetterOrDigit() }.take(8)
 
+    private fun blocked(): MutableSet<String> = try {
+        val a = JSONArray(sp.getString("blocked", "[]"))
+        (0 until a.length()).map { a.getString(it) }.toMutableSet()
+    } catch (e: Exception) { mutableSetOf() }
+
+    private fun saveBlocked(set: MutableSet<String>) {
+        val a = JSONArray(); set.forEach { a.put(it) }
+        sp.edit().putString("blocked", a.toString()).apply()
+    }
+
+    /** Manual add by code: unblocks the rider and adds them. */
     fun add(code: String) {
         val c = clean(code)
         if (c.isBlank() || c == Prefs.id) return
+        val b = blocked(); b.remove(c); saveBlocked(b)
         if (contacts.value.any { it.code == c }) return
         contacts.value = contacts.value + RiderContact(c, "")
         save()
@@ -64,15 +76,21 @@ object RiderBook {
 
     fun remove(code: String) {
         contacts.value = contacts.value.filterNot { it.code == code }
+        val b = blocked(); b.add(code); saveBlocked(b)
         save()
     }
 
-    /** Remember the name that belongs to a rider code. */
-    fun note(code: String, name: String) {
-        if (name.isBlank()) return
+    /** Called when a rider from the group is seen (hello / SOS / reminder): list them on both phones. */
+    fun see(code: String, name: String) {
+        val c = clean(code)
+        if (c.isBlank() || c == Prefs.id) return
+        if (blocked().contains(c)) return
         val list = contacts.value
-        val i = list.indexOfFirst { it.code == code }
-        if (i >= 0 && list[i].name != name) {
+        val i = list.indexOfFirst { it.code == c }
+        if (i < 0) {
+            contacts.value = list + RiderContact(c, name)
+            save()
+        } else if (name.isNotBlank() && list[i].name != name) {
             contacts.value = list.toMutableList().also { it[i] = list[i].copy(name = name) }
             save()
         }

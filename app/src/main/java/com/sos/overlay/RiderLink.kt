@@ -48,7 +48,8 @@ object LinkStatus {
 class RiderLink(
     private val ctx: Context,
     private val onPacket: (SosPacket) -> Unit,
-    private val onStatus: (String) -> Unit
+    private val onStatus: (String) -> Unit,
+    private val onLinked: () -> Unit = {}
 ) {
     private var nearby: ConnectionsClient? = null
     private val connected: MutableSet<String> = Collections.synchronizedSet(HashSet())
@@ -85,7 +86,10 @@ class RiderLink(
         val life = object : ConnectionLifecycleCallback() {
             override fun onConnectionInitiated(ep: String, info: ConnectionInfo) { client.acceptConnection(ep, payload) }
             override fun onConnectionResult(ep: String, res: ConnectionResolution) {
-                if (res.status.isSuccess) connected.add(ep)
+                if (res.status.isSuccess) {
+                    connected.add(ep)
+                    onLinked()
+                }
                 status("Nearby: ${connected.size} rider(s) linked")
             }
             override fun onDisconnected(ep: String) {

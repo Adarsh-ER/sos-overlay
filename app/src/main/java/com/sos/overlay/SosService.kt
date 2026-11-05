@@ -101,11 +101,25 @@ class SosService : Service() {
 
         if (link == null || startedGroup != Prefs.group) {
             link?.stop()
-            link = RiderLink(this, ::onPacket, { })
+            link = RiderLink(this, ::onPacket, { }, onLinked = { sendHello() })
             link?.start(Prefs.group)
             startedGroup = Prefs.group
+            main.removeCallbacks(beat)
+            main.post(beat)
         }
         return START_STICKY
+    }
+
+    /** Presence heartbeat: lets every rider in the group see every other rider on both phones. */
+    private val beat = object : Runnable {
+        override fun run() {
+            sendHello()
+            main.postDelayed(this, 30000)
+        }
+    }
+
+    private fun sendHello() {
+        link?.send(SosPacket(Prefs.id, Prefs.name, "hello", 0.0, 0.0, System.currentTimeMillis()))
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -235,7 +249,12 @@ class SosService : Service() {
 
     private fun onPacket(p: SosPacket) {
         if (p.id == Prefs.id) return
-        RiderBook.note(p.id, p.name)
+        if (p.kind == "hello") {
+            // A rider joined the group: show them on this phone too.
+            RiderBook.see(p.id, p.name)
+            return
+        }
+        RiderBook.see(p.id, p.name)
         // Nearby/online callbacks can arrive on a background thread; overlays must be touched on the main thread.
         main.post { showIncoming(p) }
     }
@@ -412,6 +431,7 @@ class SosService : Service() {
 
     override fun onDestroy() {
         removeCard()
+        main.removeCallbacks(beat)
         bubble?.let { try { wm.removeView(it) } catch (e: Exception) {} }
         bubble = null
         try { fused.removeLocationUpdates(locCb) } catch (e: Exception) {}

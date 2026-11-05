@@ -8,7 +8,8 @@ stays on top of Google Maps (or any app) and shares its location with the riders
 - Floating red button on top of other apps (`SYSTEM_ALERT_WINDOW`), draggable.
 - Tap → **SOS** (shares your live location), **Fuel** or **Food** (reminder only — no location popup).
 - **Rider codes**: every phone has a unique code (e.g. `M6Z32U`); add a rider by entering their code
-  (Copy / Share buttons included). Names fill in automatically when they send something.
+  (Copy / Share buttons included). Riders in the same group also **appear automatically on both
+  phones** via a presence heartbeat, with their names.
 - Every popup also raises a **system notification** and **auto-closes after 5 seconds**.
 - Two-way: any rider in the group can send SOS / Fuel / Food and everyone receives it.
 - Alert card when a rider sends an SOS: sender, distance, **Open in Google Maps**, **Share location**, **Close**.
