@@ -18,6 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -25,10 +26,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
+        Prefs.init(this)
         setContent { MaterialTheme { Screen() } }
     }
 }
@@ -42,11 +45,22 @@ fun Screen() {
     var overlay by remember { mutableStateOf(Settings.canDrawOverlays(ctx)) }
     var location by remember { mutableStateOf(hasLocation(ctx)) }
     var running by remember { mutableStateOf(SosService.running) }
+    var name by remember { mutableStateOf(Prefs.name) }
+    var group by remember { mutableStateOf(Prefs.group) }
+    var offline by remember { mutableStateOf(Prefs.offline) }
+    var online by remember { mutableStateOf(Prefs.online) }
+    var riders by remember { mutableStateOf(Prefs.riders()) }
+    var newRider by remember { mutableStateOf("") }
     val perms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         location = hasLocation(ctx)
     }
+    val link by produceState(LinkStatus.text) {
+        while (true) {
+            value = LinkStatus.text
+            delay(1000)
+        }
+    }
 
-    // Refresh state when the user returns from system settings.
     LaunchedEffect(Unit) {
         overlay = Settings.canDrawOverlays(ctx)
         location = hasLocation(ctx)
@@ -55,15 +69,61 @@ fun Screen() {
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text("🆘 SOS Overlay", fontSize = 26.sp, fontWeight = FontWeight.Bold)
         Text(
-            "A floating red SOS button that stays on top of Google Maps (or any other app). " +
-                "Tap it to capture your location and open or share it in Google Maps.",
+            "Floating SOS / Fuel / Food button above Google Maps, shared with riders in your group — " +
+                "offline over Bluetooth/Wi-Fi and online over the internet.",
             fontSize = 14.sp
         )
 
+        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+        Text("Rider group", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        OutlinedTextField(
+            name, { name = it; Prefs.name = it },
+            label = { Text("Your name") }, singleLine = true, modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            group, { group = it.uppercase(); Prefs.group = it },
+            label = { Text("Group code (same on every rider's phone)") }, singleLine = true, modifier = Modifier.fillMaxWidth()
+        )
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Offline sharing (Bluetooth/Wi-Fi)", Modifier.weight(1f), fontSize = 14.sp)
+            Switch(offline, { offline = it; Prefs.offline = it })
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Online sharing (internet)", Modifier.weight(1f), fontSize = 14.sp)
+            Switch(online, { online = it; Prefs.online = it })
+        }
+
+        Text("Riders in this group", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        if (riders.isEmpty()) {
+            Text("No riders added yet — share the group code with them.", fontSize = 12.sp, color = Color.Gray)
+        }
+        riders.forEach { r ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(r, Modifier.weight(1f), fontSize = 14.sp)
+                TextButton(onClick = { riders = riders - r; Prefs.saveRiders(riders) }) { Text("Remove") }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                newRider, { newRider = it },
+                label = { Text("Add rider name") }, singleLine = true, modifier = Modifier.weight(1f)
+            )
+            Button(onClick = {
+                val t = newRider.trim()
+                if (t.isNotEmpty()) {
+                    riders = riders + t
+                    Prefs.saveRiders(riders)
+                    newRider = ""
+                }
+            }) { Text("Add") }
+        }
+
+        HorizontalDivider(Modifier.padding(vertical = 4.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusChip("Overlay", overlay)
             StatusChip("Location", location)
@@ -78,8 +138,8 @@ fun Screen() {
                     )
                 },
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("1 · Allow floating overlay") }
-            Text("Choose SOS Overlay and turn on \"Allow display over other apps\".", fontSize = 12.sp, color = Color.Gray)
+            ) { Text("Allow floating overlay") }
+            Text("Choose SOS Overlay → \"Allow display over other apps\".", fontSize = 12.sp, color = Color.Gray)
         }
 
         if (!location) {
@@ -88,12 +148,20 @@ fun Screen() {
                     val list = buildList {
                         add(Manifest.permission.ACCESS_FINE_LOCATION)
                         add(Manifest.permission.ACCESS_COARSE_LOCATION)
-                        if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+                        if (Build.VERSION.SDK_INT >= 31) {
+                            add(Manifest.permission.BLUETOOTH_SCAN)
+                            add(Manifest.permission.BLUETOOTH_ADVERTISE)
+                            add(Manifest.permission.BLUETOOTH_CONNECT)
+                        }
+                        if (Build.VERSION.SDK_INT >= 33) {
+                            add(Manifest.permission.NEARBY_WIFI_DEVICES)
+                            add(Manifest.permission.POST_NOTIFICATIONS)
+                        }
                     }
                     perms.launch(list.toTypedArray())
                 },
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("2 · Allow location") }
+            ) { Text("Allow location & nearby") }
         }
 
         Button(
@@ -101,11 +169,11 @@ fun Screen() {
             onClick = {
                 ContextCompat.startForegroundService(ctx, Intent(ctx, SosService::class.java))
                 running = true
-                Toast.makeText(ctx, "Floating SOS button is on", Toast.LENGTH_SHORT).show()
+                Toast.makeText(ctx, "Floating SOS is on", Toast.LENGTH_SHORT).show()
             },
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
             modifier = Modifier.fillMaxWidth()
-        ) { Text("3 · Turn on floating SOS") }
+        ) { Text("Turn on floating SOS") }
 
         OutlinedButton(
             enabled = running,
@@ -116,20 +184,20 @@ fun Screen() {
             modifier = Modifier.fillMaxWidth()
         ) { Text("Turn off") }
 
-        HorizontalDivider(Modifier.padding(vertical = 6.dp))
+        Text("Link: $link", fontSize = 12.sp, color = Color.Gray)
 
+        HorizontalDivider(Modifier.padding(vertical = 4.dp))
         Text("How to use", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         Text(
-            "1. Turn the floating SOS on.\n" +
-                "2. Open Google Maps and start navigating.\n" +
-                "3. The red SOS button floats above the map — tap it at any time.\n" +
-                "4. Choose \"Open in Google Maps\" to show your exact position, or \"Share location\" to send it to someone.",
+            "1. Put the same group code on every rider's phone.\n" +
+                "2. Turn on the floating SOS (restart it after changing group/channels).\n" +
+                "3. Open Google Maps — the red button floats above the map.\n" +
+                "4. Tap it → SOS / Fuel / Food → your location is shared with the group.",
             fontSize = 13.sp
         )
         Text(
-            "The button stays above the map even while you use navigation or other apps.",
-            fontSize = 12.sp,
-            color = Color.Gray
+            "Offline uses Bluetooth/Wi-Fi nearby (a few hundred metres). Online uses the internet (group code = shared topic).",
+            fontSize = 12.sp, color = Color.Gray
         )
     }
 }

@@ -14,6 +14,7 @@ import android.location.Location
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
+import android.os.Looper
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -23,13 +24,17 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import kotlin.math.abs
 
 /**
- * Draws a floating SOS button above other apps (including Google Maps) and turns a tap into
- * a location capture with "Open in Google Maps" / "Share location" actions.
+ * Floating SOS button above other apps (including Google Maps).
+ * Tap -> choose SOS / Fuel / Food -> location is captured and shared with the rider group
+ * over Bluetooth/Wi-Fi (offline) and over the internet (online).
  */
 class SosService : Service() {
     companion object {
@@ -40,13 +45,30 @@ class SosService : Service() {
     private lateinit var fused: FusedLocationProviderClient
     private var bubble: View? = null
     private var card: View? = null
+    private var link: RiderLink? = null
+    private var startedGroup: String? = null
+    @Volatile private var lastLoc: Location? = null
+
+    private val locCb = object : LocationCallback() {
+        override fun onLocationResult(r: LocationResult) {
+            r.lastLocation?.let { lastLoc = it }
+        }
+    }
+    private val main = android.os.Handler(Looper.getMainLooper())
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
+        Prefs.init(this)
         wm = getSystemService(WindowManager::class.java)
         fused = LocationServices.getFusedLocationProviderClient(this)
+        try {
+            fused.requestLocationUpdates(
+                LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000).build(),
+                locCb, Looper.getMainLooper()
+            )
+        } catch (e: SecurityException) {}
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -55,7 +77,7 @@ class SosService : Service() {
         nm.createNotificationChannel(NotificationChannel("sos", "SOS overlay", NotificationManager.IMPORTANCE_LOW))
         val note: Notification = Notification.Builder(this, "sos")
             .setContentTitle("SOS Overlay")
-            .setContentText("Floating SOS button is on")
+            .setContentText("Floating button on · group ${Prefs.group}")
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .build()
         try {
@@ -69,11 +91,21 @@ class SosService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+
         if (bubble == null) addBubble()
+
+        if (link == null || startedGroup != Prefs.group) {
+            link?.stop()
+            link = RiderLink(this, ::onPacket, { })
+            link?.start(Prefs.group)
+            startedGroup = Prefs.group
+        }
         return START_STICKY
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    // ---------------- floating bubble ----------------
 
     private fun addBubble() {
         val size = dp(64)
@@ -124,7 +156,7 @@ class SosService : Service() {
                         return true
                     }
                     MotionEvent.ACTION_UP -> {
-                        if (!moved) sos()
+                        if (!moved) showPicker()
                         return true
                     }
                 }
@@ -136,22 +168,83 @@ class SosService : Service() {
         bubble = tv
     }
 
-    private fun sos() {
+    // ---------------- sending ----------------
+
+    private fun showPicker() {
+        val box = cardBox()
+        box.addView(label("Share with your riders", 18f, true))
+        box.addView(label("Group ${Prefs.group} · ${Prefs.name}", 12f, false))
+        box.addView(action("🆘  SOS — need help") { captureAndSend("sos") })
+        box.addView(action("⛽  Fuel — need fuel") { captureAndSend("fuel") })
+        box.addView(action("🍴  Food — food stop") { captureAndSend("food") })
+        box.addView(action("Cancel") { removeCard() })
+        show(box)
+    }
+
+    private fun captureAndSend(kind: String) {
         removeCard()
         try {
             fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
-                .addOnSuccessListener { loc -> showCard(loc) }
-                .addOnFailureListener { showCard(null) }
+                .addOnSuccessListener { loc -> lastLoc = loc; send(kind, loc) }
+                .addOnFailureListener { send(kind, lastLoc) }
         } catch (e: SecurityException) {
-            Toast.makeText(this, "Location permission missing", Toast.LENGTH_SHORT).show()
-            showCard(null)
+            send(kind, lastLoc)
         }
     }
 
-    private fun showCard(loc: Location?) {
-        removeCard()
+    private fun send(kind: String, loc: Location?) {
+        if (loc == null) {
+            val box = cardBox()
+            box.addView(label("${emoji(kind)} ${title(kind)}", 20f, true))
+            box.addView(label("No GPS fix yet — wait a moment and try again.", 14f, false))
+            box.addView(action("OK") { removeCard() })
+            show(box)
+            return
+        }
+        val p = SosPacket(Prefs.id, Prefs.name, kind, loc.latitude, loc.longitude, System.currentTimeMillis())
+        link?.send(p)
+
+        val box = cardBox()
+        box.addView(label("${emoji(kind)} ${title(kind)} sent", 20f, true))
+        box.addView(label("Shared with group ${Prefs.group}", 13f, false))
+        box.addView(label("%.5f, %.5f".format(loc.latitude, loc.longitude), 13f, false))
+        box.addView(action("Open in Google Maps") { openMaps(loc) })
+        box.addView(action("Share location") { share(loc) })
+        box.addView(action("Close") { removeCard() })
+        show(box)
+    }
+
+    // ---------------- receiving ----------------
+
+    private fun onPacket(p: SosPacket) {
+        if (p.id == Prefs.id) return
+        // Nearby/online callbacks can arrive on a background thread; overlays must be touched on the main thread.
+        main.post { showIncoming(p) }
+    }
+
+    private fun showIncoming(p: SosPacket) {
+        val target = Location("gps").apply { latitude = p.lat; longitude = p.lon }
+        val dist = lastLoc?.distanceTo(target)
+        val box = cardBox()
+        box.addView(label("${emoji(p.kind)} ${title(p.kind)} — ${p.name}", 20f, true))
+        box.addView(
+            label(
+                if (dist != null) "%.1f km away · %.5f, %.5f".format(dist / 1000.0, p.lat, p.lon)
+                else "%.5f, %.5f".format(p.lat, p.lon),
+                13f, false
+            )
+        )
+        box.addView(action("Open in Google Maps") { openMaps(target) })
+        box.addView(action("Share location") { share(target) })
+        box.addView(action("Close") { removeCard() })
+        show(box)
+    }
+
+    // ---------------- overlay card helpers ----------------
+
+    private fun cardBox(): LinearLayout {
         val pad = dp(20)
-        val box = LinearLayout(this).apply {
+        return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
             background = GradientDrawable().apply {
@@ -159,19 +252,10 @@ class SosService : Service() {
                 setColor(Color.parseColor("#B42318"))
             }
         }
-        box.addView(label("🆘 SOS", 24f, true))
-        box.addView(
-            label(
-                if (loc != null) "%.5f, %.5f".format(loc.latitude, loc.longitude) else "Location not available",
-                14f, false
-            )
-        )
-        if (loc != null) {
-            box.addView(action("Open in Google Maps") { openMaps(loc) })
-            box.addView(action("Share location") { share(loc) })
-        }
-        box.addView(action("Close") { removeCard() })
+    }
 
+    private fun show(box: View) {
+        removeCard()
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -184,8 +268,13 @@ class SosService : Service() {
             wm.addView(box, lp)
             card = box
         } catch (e: Exception) {
-            // overlay permission was revoked while running
+            // overlay permission revoked
         }
+    }
+
+    private fun removeCard() {
+        card?.let { try { wm.removeView(it) } catch (e: Exception) {} }
+        card = null
     }
 
     private fun label(text: String, size: Float, bold: Boolean): TextView = TextView(this).apply {
@@ -206,6 +295,18 @@ class SosService : Service() {
         setOnClickListener { onClick() }
     }
 
+    private fun emoji(kind: String) = when (kind) {
+        "fuel" -> "⛽"
+        "food" -> "🍴"
+        else -> "🆘"
+    }
+
+    private fun title(kind: String) = when (kind) {
+        "fuel" -> "Fuel needed"
+        "food" -> "Food stop"
+        else -> "SOS"
+    }
+
     private fun mapUri(loc: Location) =
         Uri.parse("https://www.google.com/maps/search/?api=1&query=${loc.latitude},${loc.longitude}")
 
@@ -221,7 +322,7 @@ class SosService : Service() {
     private fun share(loc: Location) {
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, "SOS — my location: ${mapUri(loc)}")
+            putExtra(Intent.EXTRA_TEXT, "My location: ${mapUri(loc)}")
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         try {
@@ -231,15 +332,14 @@ class SosService : Service() {
         }
     }
 
-    private fun removeCard() {
-        card?.let { try { wm.removeView(it) } catch (e: Exception) {} }
-        card = null
-    }
-
     override fun onDestroy() {
         removeCard()
         bubble?.let { try { wm.removeView(it) } catch (e: Exception) {} }
         bubble = null
+        try { fused.removeLocationUpdates(locCb) } catch (e: Exception) {}
+        link?.stop()
+        link = null
+        startedGroup = null
         running = false
         super.onDestroy()
     }
