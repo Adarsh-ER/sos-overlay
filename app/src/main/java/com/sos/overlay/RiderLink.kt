@@ -1,6 +1,8 @@
 package com.sos.overlay
 
 import android.content.Context
+import android.net.wifi.WifiManager
+import android.bluetooth.BluetoothAdapter
 import android.util.Log
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.*
@@ -78,6 +80,15 @@ class RiderLink(
     private fun startNearby(group: String) {
         val client = Nearby.getConnectionsClient(ctx)
         nearby = client
+
+        // Nearby needs Bluetooth + Wi-Fi hardware ON (an internet connection is not required).
+        val wifiOn = try {
+            (ctx.getSystemService(Context.WIFI_SERVICE) as WifiManager).isWifiEnabled
+        } catch (e: Exception) { false }
+        val btOn = try { BluetoothAdapter.getDefaultAdapter()?.isEnabled == true } catch (e: Exception) { false }
+        if (!wifiOn || !btOn) {
+            statusNearby("Nearby: turn ON Wi-Fi + Bluetooth (internet not needed)")
+        }
 
         val payload = object : PayloadCallback() {
             override fun onPayloadReceived(ep: String, p: Payload) {

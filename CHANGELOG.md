@@ -2,6 +2,11 @@
 
 All notable changes to SOS Overlay. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.0.2] — 2026-11-05
+
+- Clear warning when Bluetooth/Wi-Fi is off: `Nearby: turn ON Wi-Fi + Bluetooth (internet not needed)`.
+- In-app note: offline sharing needs Bluetooth + Wi-Fi switched on, but no internet connection.
+
 ## [1.0.1] — 2026-11-05
 
 - Nearby diagnostics: logs for Nearby connect status, `nearby tx … to N endpoint(s)` and `nearby rx …`

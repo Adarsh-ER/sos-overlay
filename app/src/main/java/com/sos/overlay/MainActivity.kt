@@ -270,6 +270,10 @@ fun Screen() {
             "Offline uses Bluetooth/Wi-Fi nearby (a few hundred metres). Online uses the internet (group code = shared topic).",
             fontSize = 12.sp, color = Color.Gray
         )
+        Text(
+            "Offline needs Bluetooth and Wi-Fi switched ON — but no internet connection is required.",
+            fontSize = 12.sp, color = Color.Gray
+        )
     }
 }
 
