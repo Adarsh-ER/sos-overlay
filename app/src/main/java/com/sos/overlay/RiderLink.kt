@@ -28,8 +28,8 @@ data class SosPacket(
                 o.getString("id"),
                 o.optString("n", o.getString("id")),
                 o.optString("k", "sos"),
-                o.getDouble("la"),
-                o.getDouble("lo"),
+                o.optDouble("la", 0.0),
+                o.optDouble("lo", 0.0),
                 o.optLong("t", System.currentTimeMillis())
             )
         } catch (e: Exception) { null }

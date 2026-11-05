@@ -6,8 +6,11 @@ stays on top of Google Maps (or any app) and shares its location with the riders
 
 ## Features
 - Floating red button on top of other apps (`SYSTEM_ALERT_WINDOW`), draggable.
-- Tap → **SOS**, **Fuel** or **Food** → captures GPS → shares with the group.
-- Alert card when a rider sends something: sender name, distance, **Open in Google Maps**, **Share location**, **Close**.
+- Tap → **SOS** (shares your live location), **Fuel** or **Food** (reminder only — no location popup).
+- Every popup also raises a **system notification** and **auto-closes after 5 seconds**.
+- Two-way: any rider in the group can send SOS / Fuel / Food and everyone receives it.
+- Alert card when a rider sends an SOS: sender, distance, **Open in Google Maps**, **Share location**, **Close**.
+- Reminder card for Fuel / Food: just the reminder text — no coordinates, no map buttons.
 - **Rider group** config: your name, group code, rider list, and the two sharing channels.
 - **Offline**: Google Nearby Connections (Bluetooth/Wi-Fi, no mobile data, a few hundred metres).
 - **Online**: internet via a public `ntfy.sh` topic derived from the group code (no account/server needed).
@@ -20,7 +23,6 @@ stays on top of Google Maps (or any app) and shares its location with the riders
 4. Turn on **Offline** and/or **Online** sharing.
 5. Tap **Turn on floating SOS** (restart it after changing group/channels).
 6. Open Google Maps — the red button floats above it. Tap it → SOS / Fuel / Food.
-
 ## Build
 ```
 ./gradlew assembleDebug        # -> app/build/outputs/apk/debug/app-debug.apk

@@ -2,7 +2,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
 android {
     namespace = "com.sos.overlay"
     compileSdk = 34
-    defaultConfig { applicationId = "com.sos.overlay"; minSdk = 26; targetSdk = 34; versionCode = 3; versionName = "0.3.0" }
+    defaultConfig { applicationId = "com.sos.overlay"; minSdk = 26; targetSdk = 34; versionCode = 4; versionName = "0.3.1" }
     buildFeatures { compose = true }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }

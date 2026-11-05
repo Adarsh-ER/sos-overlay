@@ -3,6 +3,7 @@ package com.sos.overlay
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -33,12 +34,14 @@ import kotlin.math.abs
 
 /**
  * Floating SOS button above other apps (including Google Maps).
- * Tap -> choose SOS / Fuel / Food -> location is captured and shared with the rider group
- * over Bluetooth/Wi-Fi (offline) and over the internet (online).
+ * Tap -> SOS (shares your location), Fuel / Food (reminder to the group, no location).
+ * Shared over Bluetooth/Wi-Fi (offline) and the internet (online). Popups raise a notification
+ * and auto-close after 5 seconds.
  */
 class SosService : Service() {
     companion object {
         @Volatile var running = false
+        private const val POPUP_MS = 5000L
     }
 
     private lateinit var wm: WindowManager
@@ -47,6 +50,7 @@ class SosService : Service() {
     private var card: View? = null
     private var link: RiderLink? = null
     private var startedGroup: String? = null
+    private var autoClose: Runnable? = null
     @Volatile private var lastLoc: Location? = null
 
     private val locCb = object : LocationCallback() {
@@ -174,9 +178,9 @@ class SosService : Service() {
         val box = cardBox()
         box.addView(label("Share with your riders", 18f, true))
         box.addView(label("Group ${Prefs.group} · ${Prefs.name}", 12f, false))
-        box.addView(action("🆘  SOS — need help") { captureAndSend("sos") })
-        box.addView(action("⛽  Fuel — need fuel") { captureAndSend("fuel") })
-        box.addView(action("🍴  Food — food stop") { captureAndSend("food") })
+        box.addView(action("🆘  SOS — share my location") { captureAndSend("sos") })
+        box.addView(action("⛽  Fuel — remind the group") { sendReminder("fuel") })
+        box.addView(action("🍴  Food — remind the group") { sendReminder("food") })
         box.addView(action("Cancel") { removeCard() })
         show(box)
     }
@@ -190,6 +194,18 @@ class SosService : Service() {
         } catch (e: SecurityException) {
             send(kind, lastLoc)
         }
+    }
+
+    /** Fuel / Food are reminders only — no location is captured or shown. */
+    private fun sendReminder(kind: String) {
+        val p = SosPacket(Prefs.id, Prefs.name, kind, 0.0, 0.0, System.currentTimeMillis())
+        link?.send(p)
+        val box = cardBox()
+        box.addView(label("${emoji(kind)} ${title(kind)} sent", 20f, true))
+        box.addView(label(reminderText(kind), 14f, false))
+        box.addView(label("Shared with group ${Prefs.group}", 13f, false))
+        box.addView(action("Close") { removeCard() })
+        show(box)
     }
 
     private fun send(kind: String, loc: Location?) {
@@ -223,10 +239,27 @@ class SosService : Service() {
     }
 
     private fun showIncoming(p: SosPacket) {
-        val target = Location("gps").apply { latitude = p.lat; longitude = p.lon }
-        val dist = lastLoc?.distanceTo(target)
+        if (p.kind == "sos") showSosIncoming(p) else showReminderIncoming(p)
+    }
+
+    /** Fuel / Food are reminders: notification + popup, no location. */
+    private fun showReminderIncoming(p: SosPacket) {
+        notify("${emoji(p.kind)} ${title(p.kind)}", "${p.name} · group ${Prefs.group}")
         val box = cardBox()
         box.addView(label("${emoji(p.kind)} ${title(p.kind)} — ${p.name}", 20f, true))
+        box.addView(label(reminderText(p.kind), 14f, false))
+        box.addView(label("Group ${Prefs.group}", 12f, false))
+        box.addView(action("Close") { removeCard() })
+        show(box)
+    }
+
+    private fun showSosIncoming(p: SosPacket) {
+        val target = Location("gps").apply { latitude = p.lat; longitude = p.lon }
+        val dist = lastLoc?.distanceTo(target)
+        val away = dist?.let { " · " + "%.1f".format(it / 1000.0) + " km away" } ?: ""
+        notify("🆘 SOS", "${p.name} needs help$away")
+        val box = cardBox()
+        box.addView(label("🆘 SOS — ${p.name}", 20f, true))
         box.addView(
             label(
                 if (dist != null) "%.1f km away · %.5f, %.5f".format(dist / 1000.0, p.lat, p.lon)
@@ -267,14 +300,46 @@ class SosService : Service() {
         try {
             wm.addView(box, lp)
             card = box
+            // Every popup is visible for 5 seconds and then closes on its own.
+            val r = Runnable { removeCard() }
+            autoClose = r
+            main.postDelayed(r, POPUP_MS)
         } catch (e: Exception) {
             // overlay permission revoked
         }
     }
 
     private fun removeCard() {
+        autoClose?.let { main.removeCallbacks(it) }
+        autoClose = null
         card?.let { try { wm.removeView(it) } catch (e: Exception) {} }
         card = null
+    }
+
+    /** Shows a system notification for an incoming rider alert / popup. */
+    private fun notify(title: String, text: String) {
+        try {
+            val nm = getSystemService(NotificationManager::class.java)
+            if (Build.VERSION.SDK_INT >= 26) {
+                nm.createNotificationChannel(
+                    NotificationChannel("alerts", "Rider alerts", NotificationManager.IMPORTANCE_HIGH)
+                )
+            }
+            val open = PendingIntent.getActivity(
+                this, 0, Intent(this, MainActivity::class.java),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val n = Notification.Builder(this, "alerts")
+                .setContentTitle(title)
+                .setContentText(text)
+                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                .setAutoCancel(true)
+                .setContentIntent(open)
+                .build()
+            nm.notify((System.currentTimeMillis() % 100000).toInt(), n)
+        } catch (e: Exception) {
+            // notifications not allowed — the popup still shows
+        }
     }
 
     private fun label(text: String, size: Float, bold: Boolean): TextView = TextView(this).apply {
@@ -302,9 +367,15 @@ class SosService : Service() {
     }
 
     private fun title(kind: String) = when (kind) {
-        "fuel" -> "Fuel needed"
-        "food" -> "Food stop"
+        "fuel" -> "Fuel break"
+        "food" -> "Food break"
         else -> "SOS"
+    }
+
+    private fun reminderText(kind: String) = when (kind) {
+        "fuel" -> "Time for a fuel break — top up and regroup."
+        "food" -> "Time for a food break — stop and eat together."
+        else -> ""
     }
 
     private fun mapUri(loc: Location) =

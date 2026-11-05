@@ -39,11 +39,16 @@ class MainActivity : ComponentActivity() {
 private fun hasLocation(c: Context) =
     ContextCompat.checkSelfPermission(c, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
+private fun hasNotifications(c: Context) =
+    Build.VERSION.SDK_INT < 33 ||
+        ContextCompat.checkSelfPermission(c, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
 @Composable
 fun Screen() {
     val ctx = LocalContext.current
     var overlay by remember { mutableStateOf(Settings.canDrawOverlays(ctx)) }
     var location by remember { mutableStateOf(hasLocation(ctx)) }
+    var notifications by remember { mutableStateOf(hasNotifications(ctx)) }
     var running by remember { mutableStateOf(SosService.running) }
     var name by remember { mutableStateOf(Prefs.name) }
     var group by remember { mutableStateOf(Prefs.group) }
@@ -53,6 +58,7 @@ fun Screen() {
     var newRider by remember { mutableStateOf("") }
     val perms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         location = hasLocation(ctx)
+        notifications = hasNotifications(ctx)
     }
     val link by produceState(LinkStatus.text) {
         while (true) {
@@ -64,6 +70,7 @@ fun Screen() {
     LaunchedEffect(Unit) {
         overlay = Settings.canDrawOverlays(ctx)
         location = hasLocation(ctx)
+        notifications = hasNotifications(ctx)
         running = SosService.running
     }
 
@@ -127,6 +134,7 @@ fun Screen() {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusChip("Overlay", overlay)
             StatusChip("Location", location)
+            StatusChip("Alerts", notifications)
             StatusChip("Active", running)
         }
 
@@ -164,6 +172,13 @@ fun Screen() {
             ) { Text("Allow location & nearby") }
         }
 
+        if (!notifications) {
+            Button(
+                onClick = { perms.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS)) },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Allow notifications (rider alerts)") }
+        }
+
         Button(
             enabled = overlay && location && !running,
             onClick = {
@@ -192,7 +207,8 @@ fun Screen() {
             "1. Put the same group code on every rider's phone.\n" +
                 "2. Turn on the floating SOS (restart it after changing group/channels).\n" +
                 "3. Open Google Maps — the red button floats above the map.\n" +
-                "4. Tap it → SOS / Fuel / Food → your location is shared with the group.",
+                "4. Tap it → SOS shares your location; Fuel / Food just remind the group.\n" +
+                "5. Popups raise a notification and close after 5 seconds.",
             fontSize = 13.sp
         )
         Text(
